@@ -5,14 +5,14 @@ import (
 	"time"
 )
 
-func NewEtcd(endpoints []string) (*clientv3.Client, error) {
+func NewEtcd(endpoints []string) *clientv3.Client {
 	cfg := clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: 5 * time.Second,
 	}
 	cli, err := clientv3.New(cfg)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
-	return cli, nil
+	return cli
 }

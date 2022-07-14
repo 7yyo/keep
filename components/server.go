@@ -1,42 +1,41 @@
 package components
 
 import (
-	"github.com/manifoldco/promptui"
 	"go.etcd.io/etcd/clientv3"
+	"keep/components/cdc"
+	components "keep/components/pd"
+	"keep/components/tidb"
 )
 
 type Server struct {
 	Etcd *clientv3.Client
-	*PlacementDriver
+	*components.PlacementDriver
+	TiDBCluster []*tidb.TiDB
 }
 
-func (s *Server) Cdc() error {
+type Runner interface {
+	Run() error
+}
 
-	prompt := promptui.Select{
-		Label: " cdc ",
-		Items: []string{
-			"capture",
-			"changefeed",
-			"processor",
-		},
+func (s *Server) Run(c string) error {
+	var err error
+	switch c {
+	case "cdc":
+		r := cdc.Runner{
+			Etcd: s.Etcd,
+			Pd:   s.PlacementDriver,
+		}
+		err = r.Run()
+	case "tidb":
+		r := tidb.Runner{
+			Etcd:        s.Etcd,
+			Pd:          s.PlacementDriver,
+			TidbCluster: s.TiDBCluster,
+		}
+		err = r.Run()
 	}
-	_, result, err := prompt.Run()
 	if err != nil {
 		return err
-	}
-
-	switch result {
-	case "capture":
-		captures, err := captureInfo(s.Etcd)
-		if err != nil {
-			return err
-		}
-		if err := displayCapture(captures); err != nil {
-			return err
-		}
-	case "changefeed":
-	default:
-
 	}
 	return nil
 }

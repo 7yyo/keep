@@ -42,12 +42,12 @@ type PlacementDriver struct {
 	} `json:"etcd_leader"`
 }
 
-func NewPlacementDriver(pd string) (*PlacementDriver, error) {
+func NewPlacementDriver(pd string) *PlacementDriver {
 	ps, err := util.GetHttp(fmt.Sprintf("http://%s/pd/api/v1/members", pd))
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 	var pdGroup PlacementDriver
 	err = json.Unmarshal(ps, &pdGroup)
-	return &pdGroup, nil
+	return &pdGroup
 }
