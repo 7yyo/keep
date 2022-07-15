@@ -10,9 +10,12 @@ func IsNil(i interface{}) interface{} {
 }
 
 func Status(s string) string {
-	if s == "normal" {
-		return color.Green("NORMAL")
-	} else {
-		return color.Red("ERROR")
+	switch s {
+	case "normal":
+		return color.Green(s)
+	case "stop":
+		return color.Yellow(s)
+	default:
+		return s
 	}
 }

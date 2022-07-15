@@ -9,18 +9,17 @@ import (
 	"keep/components"
 	pd "keep/components/pd"
 	"keep/components/tidb"
+	"keep/util/color"
 )
 
 func main() {
 
 	defer fmt.Println("\ngoodbye!")
-
-	var err error
 	endpoints := args()
 
 	etcd := components.NewEtcd(endpoints)
 	pdGroup := pd.NewPlacementDriver(endpoints[0])
-	tidbCluster := tidb.NewTiDBCluster(*etcd)
+	tidbCluster := tidb.NewTiDBCluster(etcd)
 
 	s := components.Server{
 		Etcd:            etcd,
@@ -35,14 +34,11 @@ func main() {
 			"tidb",
 		},
 	}
-	_, m, err := prompt.Run()
-	if err != nil {
-		panic(err)
-	}
+	_, m, _ := prompt.Run()
 
 	log.SetLevel(zapcore.PanicLevel)
 	if err := s.Run(m); err != nil {
-		panic(err)
+		fmt.Println(color.Red(fmt.Sprintf("sorry, an error occurred: \n%s", err.Error())))
 	}
 
 }
@@ -55,7 +51,7 @@ func args() []string {
 	if endpoint == "" {
 		endpoint = "172.16.5.133:2379"
 	}
-	var endpoints []string
+	endpoints := make([]string, 0)
 	endpoints = append(endpoints, endpoint)
 	return endpoints
 }

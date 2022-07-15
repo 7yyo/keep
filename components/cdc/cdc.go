@@ -4,6 +4,7 @@ import (
 	"github.com/manifoldco/promptui"
 	"go.etcd.io/etcd/clientv3"
 	components "keep/components/pd"
+	"sync"
 )
 
 type Runner struct {
@@ -11,6 +12,7 @@ type Runner struct {
 	changefeedId string
 	Etcd         *clientv3.Client
 	Pd           *components.PlacementDriver
+	sync.RWMutex
 }
 
 func (r *Runner) Run() error {
@@ -29,13 +31,9 @@ func (r *Runner) Run() error {
 
 	switch m {
 	case "capture":
-		if err := r.DisplayCapture(); err != nil {
-			return err
-		}
+		return r.displayCapture()
 	case "changefeed":
-		if err := r.DisplayChangefeed(); err != nil {
-			return err
-		}
+		return r.displayChangefeed()
 	}
 	return nil
 }

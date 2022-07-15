@@ -29,7 +29,7 @@ func (r *Runner) Run() error {
 	prompt := promptui.Select{
 		Label: "tidb",
 		Items: []string{
-			"mvcc",
+			"schema",
 		},
 	}
 	_, m, err := prompt.Run()
@@ -38,24 +38,22 @@ func (r *Runner) Run() error {
 	}
 
 	switch m {
-	case "mvcc":
-		tbl, err := r.displayTiDBSchema()
-		if err != nil {
-			return err
-		}
-		if err := r.tidbTableMVCC(tbl); err != nil {
-			return err
-		}
+	case "schema":
+		err = r.displayTiDBSchema()
+	}
+	if err != nil {
+		return err
 	}
 	return nil
 }
 
-func NewTiDBCluster(etcd clientv3.Client) []*TiDB {
+func NewTiDBCluster(etcd *clientv3.Client) []*TiDB {
 	r, err := etcd.Get(context.TODO(), "/topology/tidb/", clientv3.WithPrefix())
 	if err != nil {
 		panic(err)
 	}
-	var tidbCluster []*TiDB
+
+	tidbCluster := make([]*TiDB, 0)
 	var t TiDB
 	for _, v := range r.Kvs {
 		if string(v.Key[len(v.Key)-4:]) == "info" {

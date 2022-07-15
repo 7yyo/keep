@@ -17,6 +17,10 @@ func Red(s string) string {
 	return textColor(textRed, s)
 }
 
+func Yellow(s string) string {
+	return textColor(textYellow, s)
+}
+
 func Green(s string) string {
 	return textColor(textGreen, s)
 }
