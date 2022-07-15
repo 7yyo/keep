@@ -10,9 +10,9 @@ func NewEtcd(endpoints []string) *clientv3.Client {
 		Endpoints:   endpoints,
 		DialTimeout: 5 * time.Second,
 	}
-	cli, err := clientv3.New(cfg)
+	etcd, err := clientv3.New(cfg)
 	if err != nil {
 		panic(err)
 	}
-	return cli
+	return etcd
 }

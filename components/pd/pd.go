@@ -3,7 +3,7 @@ package components
 import (
 	"encoding/json"
 	"fmt"
-	"keep/util"
+	net "keep/util/net"
 )
 
 type PlacementDriver struct {
@@ -43,7 +43,7 @@ type PlacementDriver struct {
 }
 
 func NewPlacementDriver(pd string) *PlacementDriver {
-	ps, err := util.GetHttp(fmt.Sprintf("http://%s/pd/api/v1/members", pd))
+	ps, err := net.GetHttp(fmt.Sprintf("http://%s/pd/api/v1/members", pd))
 	if err != nil {
 		panic(err)
 	}

@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"github.com/jedib0t/go-pretty/v6/list"
 	"github.com/manifoldco/promptui"
+	"github.com/tikv/client-go/v2/oracle"
 	"keep/components/tidb"
-	"keep/util"
+	"keep/util/color"
+	net "keep/util/net"
+	o "keep/util/oracle"
 	"keep/util/printer"
 	"keep/util/sys"
+	"sync"
 )
 
 type changefeed []struct {
@@ -41,7 +45,7 @@ type changefeedDetail struct {
 }
 
 func changefeedInfo(h string) (changefeed, error) {
-	r, err := util.GetHttp(fmt.Sprintf("http://%s/api/v1/changefeeds", h))
+	r, err := net.GetHttp(fmt.Sprintf("http://%s/api/v1/changefeeds", h))
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +59,7 @@ func changefeedInfo(h string) (changefeed, error) {
 	return cf, nil
 }
 
-func (r *Runner) DisplayChangefeed() error {
+func (r *Runner) displayChangefeed() error {
 
 	_, err := r.captureInfo()
 	if err != nil {
@@ -66,37 +70,60 @@ func (r *Runner) DisplayChangefeed() error {
 		return err
 	}
 
-	var changefeedOption []string
+	changefeedOption := make([]string, 0)
 	for _, cf := range cfs {
 		changefeedOption = append(changefeedOption, cf.Id)
 	}
 	changefeedOption = append(changefeedOption, "return?")
 
 	p := promptui.Select{
-		Label: "changefeed list",
+		Label: "cdc changefeed list",
 		Items: changefeedOption,
 	}
-	_, m, err := p.Run()
+	_, c, err := p.Run()
 	if err != nil {
 		return err
 	}
 
-	if m == "return?" {
+	if c == "return?" {
 		if err := r.Run(); err != nil {
 			return err
 		}
 	}
 
-	r.changefeedId = m
-	if err := r.displayChangefeedDetail(); err != nil {
+	r.changefeedId = c
+	return r.displayChangefeedMenu()
+}
+
+func (r *Runner) displayChangefeedMenu() error {
+
+	p := promptui.Select{
+		Label: r.changefeedId,
+		Items: []string{
+			"details?",
+			"return?",
+		},
+	}
+	_, c, err := p.Run()
+	if err != nil {
 		return err
 	}
 
+	switch c {
+	case "details?":
+		if err := r.displayChangefeedDetails(); err != nil {
+			return err
+		}
+	case "return?":
+		if err := r.displayChangefeed(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func (r *Runner) displayChangefeedDetail() error {
-	body, err := util.GetHttp(fmt.Sprintf("http://%s/api/v1/changefeeds/%s", r.captures[0].Address, r.changefeedId))
+func (r *Runner) displayChangefeedDetails() error {
+	body, err := net.GetHttp(fmt.Sprintf("http://%s/api/v1/changefeeds/%s", r.captures[0].Address, r.changefeedId))
 	if err != nil {
 		return err
 	}
@@ -106,19 +133,23 @@ func (r *Runner) displayChangefeedDetail() error {
 		return err
 	}
 
-	sm, err := tidb.SchemaInfo(r.Pd.Leader.ClientUrls[0], cd.CheckpointTso)
+	partitions, err := tidb.ListPartition(r.Pd.Leader.ClientUrls[0], o.CheckPointTs(), r.Etcd)
 	if err != nil {
 		return err
 	}
-	sMap := make(map[int64]string)
-	for _, s := range sm.DBs {
-		for _, t := range s.Tables {
-			sMap[t.ID] = fmt.Sprintf("`%s`.`%s`", s.Name, t.Name.String())
+	pm := make(map[int8]string)
+	for _, partition := range partitions {
+		if partition.Name == "" {
+			pm[int8(partition.Table.ID)] = fmt.Sprintf("`%s`.`%s`", partition.DBName, partition.Table.Name.O)
+		} else {
+			pm[int8(partition.ID)] = fmt.Sprintf("`%s`.`%s` [%s]", partition.DBName, partition.Table.Name.O, partition.Name)
 		}
 	}
 
 	l := list.NewWriter()
 	l.SetStyle(list.StyleBulletCircle)
+	l.AppendItems([]interface{}{color.Green(fmt.Sprintf("[%s]", cd.ID))})
+	l.Indent()
 	l.AppendItems([]interface{}{
 		fmt.Sprintf("sink_url:         %s", cd.SinkURI),
 		fmt.Sprintf("create_time:      %s", cd.CreateTime),
@@ -130,23 +161,55 @@ func (r *Runner) displayChangefeedDetail() error {
 		fmt.Sprintf("state:            %v", printer.Status(cd.State)),
 		fmt.Sprintf("error:            %v", printer.IsNil(cd.Error)),
 		fmt.Sprintf("error_history:    %v", printer.IsNil(cd.ErrorHistory)),
-		"task_status: "})
+		"",
+		"processor: "})
 	l.Indent()
-	for _, ts := range cd.TaskStatus {
-		for _, cp := range r.captures {
-			if cp.Id == ts.CaptureID {
-				l.AppendItems([]interface{}{fmt.Sprintf("%s", cp.Address)})
-				break
+
+	cm := make(map[capture]processor)
+	wg := &sync.WaitGroup{}
+	errors := make(chan error)
+	defer close(errors)
+	for _, c := range r.captures {
+		wg.Add(1)
+		go r.hookProcessor(c, cm, wg, errors)
+	}
+	wg.Wait()
+
+	pl, err := tidb.ListPartition(r.Pd.Leader.ClientUrls[0], o.TSOracle(), r.Etcd)
+	if err != nil {
+		return err
+	}
+
+	for c, pro := range cm {
+		l.AppendItems([]interface{}{
+			fmt.Sprintf("%s\n%s", color.Green(c.Address), color.Green(c.Id)),
+		})
+		l.Indent()
+		l.AppendItems([]interface{}{
+			fmt.Sprintf("checkpoint_ts: %d (%s)", pro.CheckpointTs, oracle.GetTimeFromTS(uint64(pro.CheckpointTs))),
+			fmt.Sprintf("resolved_ts:   %d (%s)", pro.ResolvedTs, oracle.GetTimeFromTS(uint64(pro.ResolvedTs))),
+			fmt.Sprintf("lag:           %.2fs", oracle.GetTimeFromTS(uint64(pro.ResolvedTs)).Sub(oracle.GetTimeFromTS(uint64(pro.CheckpointTs))).Seconds()),
+			"tables:",
+		})
+		l.Indent()
+		for _, tbl := range pro.TableIds {
+			for _, p := range pl {
+				if p.ID == int64(tbl) {
+					l.AppendItems([]interface{}{
+						fmt.Sprintf("`%s`.`%s` [%s]", p.DBName, p.Table.Name.O, p.Name),
+					})
+					break
+				}
+				if p.Table.ID == int64(tbl) {
+					l.AppendItems([]interface{}{
+						fmt.Sprintf("`%s`.`%s`", p.DBName, p.Table.Name.O),
+					})
+					break
+				}
 			}
 		}
-		if len(ts.TableIds) > 0 {
-			l.Indent()
-			l.Indent()
-			for _, t := range ts.TableIds {
-				l.AppendItems([]interface{}{fmt.Sprintf("%v", sMap[t])})
-			}
-			l.UnIndent()
-		}
+		l.UnIndent()
+		l.UnIndent()
 	}
 	fmt.Println(l.Render())
 
@@ -156,12 +219,9 @@ func (r *Runner) displayChangefeedDetail() error {
 	}
 	result, _ := prompt.Run()
 	if result == "y" {
-		if err := r.DisplayChangefeed(); err != nil {
-			return err
-		}
+		return r.displayChangefeedMenu()
 	} else {
 		sys.Exit()
 	}
-
 	return nil
 }
