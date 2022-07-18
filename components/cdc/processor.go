@@ -10,7 +10,7 @@ import (
 type processor struct {
 	CheckpointTs int64       `json:"checkpoint_ts"`
 	ResolvedTs   int64       `json:"resolved_ts"`
-	TableIds     []int       `json:"table_ids"`
+	TableIds     []int64     `json:"table_ids"`
 	Count        int         `json:"count"`
 	Error        interface{} `json:"error"`
 }

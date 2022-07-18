@@ -10,7 +10,7 @@ import (
 	"github.com/pingcap/tiflow/pkg/config"
 	"go.etcd.io/etcd/clientv3"
 	net "keep/util/net"
-	"keep/util/oracle"
+	"keep/util/o"
 	"strconv"
 	"strings"
 	"sync"
@@ -123,7 +123,7 @@ func hookPartition(partitions *[]Partition, tidbCluster []*TiDB, d *model.DBInfo
 }
 
 func (r *Runner) displayTiDBSchema() error {
-	dbs, err := ListDatabase(r.Pd.Leader.ClientUrls[0], oracle.CheckPointTs())
+	dbs, err := ListDatabase(r.Pd.Leader.ClientUrls[0], o.CheckPointTs())
 	if err != nil {
 		return err
 	}

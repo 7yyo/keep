@@ -9,7 +9,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	net "keep/util/net"
-	"keep/util/sys"
+	"keep/util/printer"
 	"strings"
 	"sync"
 )
@@ -123,17 +123,8 @@ func (r *Runner) displayCapture() error {
 		fmt.Sprintf("pid:     %d", cs[c].Pid)})
 	fmt.Println(l.Render())
 
-	prompt := promptui.Prompt{
-		Label:     "return",
-		IsConfirm: true,
-	}
-	result, _ := prompt.Run()
-	if result == "y" {
-		if err := r.displayCapture(); err != nil {
-			return err
-		}
-	} else {
-		sys.Exit()
+	if printer.Confirm() {
+		return r.displayCapture()
 	}
 	return nil
 }

@@ -52,17 +52,16 @@ func NewTiDBCluster(etcd *clientv3.Client) []*TiDB {
 	if err != nil {
 		panic(err)
 	}
-
 	tidbCluster := make([]*TiDB, 0)
-	var t TiDB
+	var tidb TiDB
 	for _, v := range r.Kvs {
 		if string(v.Key[len(v.Key)-4:]) == "info" {
-			err := json.Unmarshal(v.Value, &t)
+			err := json.Unmarshal(v.Value, &tidb)
 			if err != nil {
 				return nil
 			}
-			t.Host = strings.Split(string(v.Key), "/")[3]
-			tidbCluster = append(tidbCluster, &t)
+			tidb.Host = strings.Split(string(v.Key), "/")[3]
+			tidbCluster = append(tidbCluster, &tidb)
 		}
 	}
 	return tidbCluster

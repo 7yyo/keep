@@ -14,6 +14,8 @@ import (
 
 func main() {
 
+	fmt.Println("\n __   ___  _______   _______    _______   \n|/\"| /  \")/\"     \"| /\"     \"|  |   __ \"\\  \n(: |/   /(: ______)(: ______)  (. |__) :) \n|    __/  \\/    |   \\/    |    |:  ____/  \n(// _  \\  // ___)_  // ___)_   (|  /      \n|: | \\  \\(:      \"|(:      \"| /|__/ \\     \n(__|  \\__)\\_______) \\_______)(_______)    \n                                          ")
+
 	defer fmt.Println("\ngoodbye!")
 	endpoints := args()
 
@@ -37,10 +39,9 @@ func main() {
 	_, m, _ := prompt.Run()
 
 	log.SetLevel(zapcore.PanicLevel)
-	if err := s.Run(m); err != nil {
-		fmt.Println(color.Red(fmt.Sprintf("sorry, an error occurred: \n%s", err.Error())))
+	if err := s.Run(m); err != nil && err.Error() != "" {
+		fmt.Println(color.Red(fmt.Sprintf("%s", err.Error())))
 	}
-
 }
 
 func args() []string {

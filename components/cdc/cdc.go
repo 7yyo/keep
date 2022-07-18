@@ -24,16 +24,16 @@ func (r *Runner) Run() error {
 			"changefeed",
 		},
 	}
-	_, m, err := prompt.Run()
+	_, c, err := prompt.Run()
 	if err != nil {
 		return err
 	}
 
-	switch m {
+	switch c {
+	case "changefeed":
+		return r.displayChangefeedList()
 	case "capture":
 		return r.displayCapture()
-	case "changefeed":
-		return r.displayChangefeed()
 	}
 	return nil
 }
