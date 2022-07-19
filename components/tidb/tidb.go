@@ -25,26 +25,22 @@ type Runner struct {
 }
 
 func (r *Runner) Run() error {
-
-	prompt := promptui.Select{
+	p := promptui.Select{
 		Label: "tidb",
 		Items: []string{
-			"schema",
+			"tpcc",
 		},
 	}
-	_, m, err := prompt.Run()
+	i, _, err := p.Run()
 	if err != nil {
 		return err
 	}
-
-	switch m {
-	case "schema":
-		err = r.displayTiDBSchema()
+	switch i {
+	case 0:
+		return r.displayTiDBSchema()
+	default:
+		return nil
 	}
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func NewTiDBCluster(etcd *clientv3.Client) []*TiDB {

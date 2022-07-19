@@ -1,8 +1,7 @@
 package util
 
 import (
-	"errors"
-	"github.com/wujiangweiphp/go-curl"
+	"bytes"
 	"io/ioutil"
 	"net/http"
 )
@@ -17,37 +16,15 @@ func GetHttp(cmd string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	body, err := ioutil.ReadAll(res.Body)
+	return ioutil.ReadAll(res.Body)
+}
+
+func PostHttp(cmd string, jsonBody string) (*http.Response, error) {
+	c := &http.Client{}
+	b := bytes.NewBufferString(jsonBody)
+	req, err := http.NewRequest("POST", cmd, b)
 	if err != nil {
 		return nil, err
 	}
-	return body, nil
-}
-
-func PostHttp(cmd string) error {
-	c := &http.Client{}
-	req, err := http.NewRequest("POST", cmd, nil)
-	if err != nil {
-		return err
-	}
-	if _, err = c.Do(req); err != nil {
-		return err
-	}
-	return nil
-}
-
-func CurlHttp(url string, queries map[string]string, postData map[string]interface{}) (string, error) {
-	headers := map[string]string{
-		"Content-Type": "application/json",
-	}
-	req := curl.NewRequest()
-	resp, err := req.SetUrl(url).SetHeaders(headers).SetQueries(queries).SetPostData(postData).Get()
-	if err != nil {
-		return "", err
-	}
-	if resp.IsOk() {
-		return resp.Body, nil
-	} else {
-		return "", errors.New("curl http failed")
-	}
+	return c.Do(req)
 }

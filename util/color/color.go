@@ -25,6 +25,10 @@ func Green(s string) string {
 	return textColor(textGreen, s)
 }
 
+func Purple(s string) string {
+	return textColor(textPurple, s)
+}
+
 func textColor(c int, s string) string {
 	return fmt.Sprintf("\x1b[0;%dm%s\x1b[0m", c, s)
 }

@@ -5,16 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/jedib0t/go-pretty/v6/list"
-	"github.com/manifoldco/promptui"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
+	"keep/promp"
 	net "keep/util/net"
 	"keep/util/printer"
 	"strings"
 	"sync"
 )
-
-const captureUrl string = "/tidb/cdc/capture/"
 
 type capture struct {
 	Id      string `json:"id"`
@@ -34,24 +32,39 @@ type captureStatus struct {
 }
 
 func (r *Runner) captureInfo() (map[string]capture, error) {
-	body, err := r.Etcd.Get(context.TODO(), captureUrl, clientv3.WithPrefix())
+
+	body, err := r.Etcd.Get(context.TODO(), "/tidb/cdc/capture/", clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
 	}
-	cMap := make(map[string]capture)
+
 	r.captures = make([]capture, 0, len(body.Kvs))
+	wg := &sync.WaitGroup{}
+	wd := make(chan bool)
+	defer close(wd)
 	errors := make(chan error)
 	defer close(errors)
-	wg := &sync.WaitGroup{}
+	cm := make(map[string]capture)
 	for _, kv := range body.Kvs {
 		wg.Add(1)
-		go r.hookCapture(kv, cMap, wg, errors)
+		go r.hookCapture(kv, cm, wg, errors)
 	}
-	wg.Wait()
-	if len(cMap) == 0 {
-		return nil, fmt.Errorf("no capture")
+
+	go func() {
+		wg.Wait()
+		wd <- true
+	}()
+	select {
+	case <-wd:
+		break
+	case err := <-errors:
+		return nil, err
 	}
-	return cMap, nil
+
+	if len(cm) == 0 {
+		return nil, fmt.Errorf("no capture in this cluster")
+	}
+	return cm, nil
 }
 
 func (r *Runner) hookCapture(kv *mvccpb.KeyValue, cMap map[string]capture, wg *sync.WaitGroup, errors chan error) {
@@ -82,12 +95,10 @@ func (r *Runner) hookCapture(kv *mvccpb.KeyValue, cMap map[string]capture, wg *s
 }
 
 func (r *Runner) displayCapture() error {
-
 	cs, err := r.captureInfo()
 	if err != nil {
 		return err
 	}
-
 	captureOption := make([]string, 0, len(cs))
 	for _, c := range cs {
 		if c.IsOwner {
@@ -97,22 +108,16 @@ func (r *Runner) displayCapture() error {
 		}
 	}
 	captureOption = append(captureOption, "return?")
-
-	p := promptui.Select{
-		Label: "cdc capture list",
-		Items: captureOption,
-	}
+	p := promp.Select(captureOption, "cdc capture list", 20)
 	_, c, err := p.Run()
 	if err != nil {
 		return err
 	}
-
 	if c == "return?" {
 		if err := r.Run(); err != nil {
 			return err
 		}
 	}
-
 	c = strings.TrimSpace(strings.Split(c, "(")[0])
 	l := list.NewWriter()
 	l.SetStyle(list.StyleBulletCircle)
@@ -122,7 +127,6 @@ func (r *Runner) displayCapture() error {
 		fmt.Sprintf("version: %s", cs[c].Version),
 		fmt.Sprintf("pid:     %d", cs[c].Pid)})
 	fmt.Println(l.Render())
-
 	if printer.Confirm() {
 		return r.displayCapture()
 	}

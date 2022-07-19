@@ -37,3 +37,7 @@ func Confirm() bool {
 	}
 	return true
 }
+
+func PrintError(e string) {
+	fmt.Println(color.Red(e))
+}

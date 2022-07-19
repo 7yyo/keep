@@ -1,9 +1,9 @@
 package cdc
 
 import (
-	"github.com/manifoldco/promptui"
 	"go.etcd.io/etcd/clientv3"
 	components "keep/components/pd"
+	"keep/promp"
 	"sync"
 )
 
@@ -15,25 +15,20 @@ type Runner struct {
 	sync.RWMutex
 }
 
-func (r *Runner) Run() error {
+var cdcOption = []string{"capture", "changefeed"}
 
-	prompt := promptui.Select{
-		Label: "cdc",
-		Items: []string{
-			"capture",
-			"changefeed",
-		},
-	}
-	_, c, err := prompt.Run()
+func (r *Runner) Run() error {
+	p := promp.Select(cdcOption, "cdc capture list", 20)
+	i, _, err := p.Run()
 	if err != nil {
 		return err
 	}
-
-	switch c {
-	case "changefeed":
-		return r.displayChangefeedList()
-	case "capture":
+	switch i {
+	case 0:
 		return r.displayCapture()
+	case 1:
+		return r.displayChangefeedList()
+	default:
+		return nil
 	}
-	return nil
 }

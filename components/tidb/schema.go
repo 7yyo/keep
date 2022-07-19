@@ -25,8 +25,8 @@ type DB struct {
 type Partition struct {
 	ID     int64
 	Name   string
-	Table  *model.TableInfo
 	DBName string
+	Table  *model.TableInfo
 }
 
 func snapshotMeta(endpoint string, checkPointTS uint64) (*meta.Meta, error) {
@@ -47,7 +47,7 @@ func ListDatabase(endpoint string, checkPointTs uint64) (*[]DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	dbl := make([]DB, 0)
+	dbs := make([]DB, 0)
 	for _, d := range ld {
 		if d.Name.String() == "mysql" {
 			continue
@@ -61,9 +61,9 @@ func ListDatabase(endpoint string, checkPointTs uint64) (*[]DB, error) {
 			Name:   d.Name.String(),
 			Tables: ts,
 		}
-		dbl = append(dbl, db)
+		dbs = append(dbs, db)
 	}
-	return &dbl, nil
+	return &dbs, nil
 }
 
 func ListPartition(endpoint string, checkPointTs uint64, etcd *clientv3.Client) ([]Partition, error) {
@@ -79,12 +79,23 @@ func ListPartition(endpoint string, checkPointTs uint64, etcd *clientv3.Client) 
 	partitions := make([]Partition, 0)
 	errors := make(chan error)
 	defer close(errors)
+	wd := make(chan bool)
 	wg := &sync.WaitGroup{}
 	for _, d := range ld {
 		wg.Add(1)
 		go hookPartition(&partitions, tidbCluster, d, ss, wg, errors)
 	}
 	wg.Wait()
+	go func() {
+		wg.Wait()
+		close(wd)
+	}()
+	select {
+	case err := <-errors:
+		return nil, err
+	case <-wd:
+		break
+	}
 	return partitions, err
 }
 
@@ -140,7 +151,6 @@ func (r *Runner) displayTiDBSchema() error {
 		Size:  20,
 	}
 	_, c, err := p.Run()
-
 	if c == "return?" {
 		if err := r.Run(); err != nil {
 			return err

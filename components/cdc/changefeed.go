@@ -9,11 +9,13 @@ import (
 	"github.com/tikv/client-go/v2/oracle"
 	"golang.org/x/sync/errgroup"
 	"keep/components/tidb"
+	"keep/promp"
 	"keep/util/color"
 	net "keep/util/net"
 	"keep/util/o"
 	"keep/util/printer"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -74,7 +76,7 @@ type changefeedConfig struct {
 			Dispatchers     interface{} `json:"dispatchers"`
 			Protocol        string      `json:"protocol"`
 			ColumnSelectors interface{} `json:"column-selectors"`
-			SchemaRegistry  string      `json:"schema-registry"`
+			SchemaRegistry  string      `json:"tpcc-registry"`
 		} `json:"sink"`
 		CyclicReplication struct {
 			Enable           bool        `json:"enable"`
@@ -141,66 +143,53 @@ func (r *Runner) displayChangefeedList() error {
 		changefeedOption = append(changefeedOption, cf.Id)
 	}
 	changefeedOption = append(changefeedOption, "return?")
-
-	p := promptui.Select{
-		Label: "cdc changefeed list",
-		Items: changefeedOption,
-	}
+	p := promp.Select(changefeedOption, "cdc changefeed list", 20)
 	_, c, err := p.Run()
 	if err != nil {
 		return err
 	}
+	r.changefeedId = c
 
 	if c == "return?" {
 		if err := r.Run(); err != nil {
 			return err
 		}
 	}
-
-	r.changefeedId = c
 	return r.displayChangefeedMenu()
+}
+
+var changefeedMenu = []string{
+	"info?",
+	"config?",
+	"pause?",
+	"resume?",
+	"transfer?",
+	"return?",
 }
 
 func (r *Runner) displayChangefeedMenu() error {
 
-	p := promptui.Select{
-		Label: r.changefeedId,
-		Items: []string{
-			"info?",
-			"config?",
-			"pause?",
-			"resume?",
-			"return?",
-		},
-	}
-	_, c, err := p.Run()
+	p := promp.Select(changefeedMenu, "cdc changefeed menu", 20)
+	i, _, err := p.Run()
 	if err != nil {
 		return err
 	}
 
-	switch c {
-	case "info?":
-		if err := r.displayChangefeedDetails(); err != nil {
-			return err
-		}
-	case "config?":
-		if err := r.displayChangefeedConfig(); err != nil {
-			return err
-		}
-	case "pause?":
-		if err := r.doChangefeed("pause", "stopped"); err != nil {
-			return err
-		}
-	case "resume?":
-		if err := r.doChangefeed("resume", "normal"); err != nil {
-			return err
-		}
-	case "return?":
-		if err := r.displayChangefeedList(); err != nil {
-			return err
-		}
+	switch i {
+	case 0:
+		err = r.displayChangefeedDetails()
+	case 1:
+		err = r.displayChangefeedConfig()
+	case 2:
+		err = r.doChangefeed("pause", "stopped")
+	case 3:
+		err = r.doChangefeed("resume", "normal")
+	case 4:
+		err = r.transferTbl()
+	case 5:
+		err = r.displayChangefeedList()
 	}
-	return nil
+	return err
 }
 
 func (r *Runner) displayChangefeedDetails() error {
@@ -283,10 +272,10 @@ func (r *Runner) displayChangefeedDetails() error {
 		for _, tbl := range pro.TableIds {
 			for _, p := range pl {
 				if p.ID == tbl {
-					tblStr += fmt.Sprintf("[`%s`.`%s`.`%s`(%s)], ", p.DBName, p.Table.Name.O, p.Name, color.Green(strconv.FormatInt(p.ID, 10)))
+					tblStr += fmt.Sprintf("[`%s`.`%s`.`%s`(%s)], ", p.DBName, p.Table.Name.O, p.Name, strconv.FormatInt(p.ID, 10))
 					break
 				} else if p.Table.ID == tbl {
-					tblStr += fmt.Sprintf("[%s]`%s`.`%s`, ", color.Green(strconv.FormatInt(p.Table.ID, 10)), p.DBName, p.Table.Name.O)
+					tblStr += fmt.Sprintf("[%s]`%s`.`%s`, ", strconv.FormatInt(p.Table.ID, 10), p.DBName, p.Table.Name.O)
 					break
 				}
 			}
@@ -298,26 +287,20 @@ func (r *Runner) displayChangefeedDetails() error {
 		l.UnIndent()
 	}
 	fmt.Println(l.Render())
-	if printer.Confirm() {
-		return r.displayChangefeedMenu()
-	}
-	return nil
+	return r.displayChangefeedMenu()
 }
 
 func (r *Runner) doChangefeed(c string, t string) error {
-
 	p := promptui.Prompt{
 		Label:     "return",
 		IsConfirm: true,
 	}
 	result, _ := p.Run()
 	if result != "y" {
-		if err := r.displayChangefeedMenu(); err != nil {
-			return err
-		}
+		return r.displayChangefeedMenu()
 	} else {
 		req := fmt.Sprintf("http://%s/api/v1/changefeeds/%s/%s", r.captures[0].Address, r.changefeedId, c)
-		if err := net.PostHttp(req); err != nil {
+		if _, err := net.PostHttp(req, ""); err != nil {
 			return err
 		}
 		group := new(errgroup.Group)
@@ -331,11 +314,8 @@ func (r *Runner) doChangefeed(c string, t string) error {
 		if err := group.Wait(); err != nil {
 			return err
 		}
-		if err := r.displayChangefeedMenu(); err != nil {
-			return err
-		}
+		return r.displayChangefeedMenu()
 	}
-	return nil
 }
 
 func (r *Runner) changefeedState(state string) error {
@@ -431,10 +411,7 @@ func (r *Runner) displayChangefeedConfig() error {
 		fmt.Sprintf("storage: %v", cc.Config.Consistent.Storage),
 	})
 	fmt.Println(l.Render())
-	if printer.Confirm() {
-		return r.displayChangefeedMenu()
-	}
-	return nil
+	return r.displayChangefeedMenu()
 }
 
 func (r *Runner) transferTbl() error {
@@ -443,16 +420,32 @@ func (r *Runner) transferTbl() error {
 		return err
 	}
 	partitions := make([]string, 0, len(pl))
+	partitions = append(partitions, "return?")
 	for _, p := range pl {
-		partitions = append(partitions, fmt.Sprintf("[%d] `%s`.`%s`.`%s`", p.ID, p.DBName, p.Table.Name, p.Name))
+		if p.Name != "" {
+			partitions = append(partitions, fmt.Sprintf("[%d] `%s`.`%s`.`%s`", p.ID, p.DBName, p.Table.Name, p.Name))
+		} else {
+			partitions = append(partitions, fmt.Sprintf("[%d] `%s`.`%s`.`%s`", p.Table.ID, p.DBName, p.Table.Name, p.Name))
+		}
 	}
-	//p := promptui.Select{
-	//	Label: "which table?",
-	//	Items: partitions}
-	//_, targetPartition, err := p.Run()
-	//if err != nil {
-	//	return err
-	//}
-
+	searcher := func(input string, index int) bool {
+		pName := partitions[index]
+		name := strings.Replace(strings.ToLower(pName), " ", "", -1)
+		input = strings.Replace(strings.ToLower(input), " ", "", -1)
+		return strings.Contains(name, input)
+	}
+	p := promptui.Select{
+		Label:    "which table?",
+		Items:    partitions,
+		Searcher: searcher,
+		Size:     20,
+	}
+	i, _, err := p.Run()
+	if err != nil {
+		return err
+	}
+	if i == 0 {
+		return r.displayChangefeedMenu()
+	}
 	return nil
 }
