@@ -313,7 +313,7 @@ func (r *Runner) configs() (map[string]string, []string, error) {
 	cm["replication-mode.replication-mode"] = cfg.ReplicationMode.ReplicationMode
 
 	keys := make([]string, 0, len(cm))
-	keys = append(keys, "return?")
+	keys = append(keys, printer.Return())
 	for k, _ := range cm {
 		keys = append(keys, k)
 	}
@@ -332,7 +332,7 @@ func (r *Runner) displayConfigs() error {
 		return strings.Contains(name, input)
 	}
 	p := promptui.Select{
-		Label:    "set which config",
+		Label:    "configs",
 		Items:    c,
 		Searcher: searcher,
 		Size:     20,
@@ -341,7 +341,7 @@ func (r *Runner) displayConfigs() error {
 	if err != nil {
 		return err
 	}
-	if result == "return?" {
+	if result == printer.Return() {
 		return r.Run()
 	}
 	pp := promptui.Prompt{
@@ -355,6 +355,7 @@ func (r *Runner) displayConfigs() error {
 		return r.displayConfigs()
 	}
 	req := fmt.Sprintf("%s/pd/api/v1/config", r.Pd.Leader.ClientUrls[0])
+
 	cp, err := strconv.Atoi(v)
 	var jsonBody string
 	if err == nil {
@@ -370,14 +371,14 @@ func (r *Runner) displayConfigs() error {
 
 	var resp *http.Response
 	resp, _ = net.PostHttp(req, jsonBody)
-	if resp.Status != "200 OK" {
+	if resp.StatusCode != 200 {
 		message, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return err
 		}
-		printer.PrintError(string(message))
+		printer.PrintError(fmt.Sprintf("update failed, error:\n%s", string(message)))
 	} else {
-		fmt.Println(color.Green("set config success"))
+		fmt.Println(color.Green("update success!"))
 	}
 	return r.displayConfigs()
 }

@@ -11,6 +11,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	net "keep/util/net"
 	"keep/util/o"
+	"keep/util/printer"
 	"strconv"
 	"strings"
 	"sync"
@@ -139,7 +140,7 @@ func (r *Runner) displayTiDBSchema() error {
 		return err
 	}
 	tblOption := make([]string, 0)
-	tblOption = append(tblOption, "return?")
+	tblOption = append(tblOption, printer.Return())
 	for _, db := range *dbs {
 		for _, tbl := range db.Tables {
 			tblOption = append(tblOption, fmt.Sprintf("`%s`.`%s`", db.Name, tbl.Name.String()))
@@ -151,7 +152,7 @@ func (r *Runner) displayTiDBSchema() error {
 		Size:  20,
 	}
 	_, c, err := p.Run()
-	if c == "return?" {
+	if c == printer.Return() {
 		if err := r.Run(); err != nil {
 			return err
 		}

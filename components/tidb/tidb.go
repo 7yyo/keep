@@ -28,7 +28,8 @@ func (r *Runner) Run() error {
 	p := promptui.Select{
 		Label: "tidb",
 		Items: []string{
-			"tpcc",
+			"schema",
+			"config",
 		},
 	}
 	i, _, err := p.Run()
@@ -38,6 +39,9 @@ func (r *Runner) Run() error {
 	switch i {
 	case 0:
 		return r.displayTiDBSchema()
+	case 1:
+		vars()
+		return nil
 	default:
 		return nil
 	}

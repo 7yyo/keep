@@ -67,6 +67,18 @@ func (r *Runner) captureInfo() (map[string]capture, error) {
 	return cm, nil
 }
 
+func (r *Runner) captureList() ([]string, error) {
+	cs, err := r.captureInfo()
+	if err != nil {
+		return nil, err
+	}
+	cl := make([]string, 0, len(cs))
+	for _, c := range cs {
+		cl = append(cl, fmt.Sprintf("%s(%s)", c.Address, c.Id))
+	}
+	return cl, nil
+}
+
 func (r *Runner) hookCapture(kv *mvccpb.KeyValue, cMap map[string]capture, wg *sync.WaitGroup, errors chan error) {
 	defer wg.Done()
 	var c capture
@@ -100,6 +112,7 @@ func (r *Runner) displayCapture() error {
 		return err
 	}
 	captureOption := make([]string, 0, len(cs))
+	captureOption = append(captureOption, printer.Return())
 	for _, c := range cs {
 		if c.IsOwner {
 			captureOption = append(captureOption, fmt.Sprintf("%s (owner)", c.Address))
@@ -107,13 +120,12 @@ func (r *Runner) displayCapture() error {
 			captureOption = append(captureOption, c.Address)
 		}
 	}
-	captureOption = append(captureOption, "return?")
 	p := promp.Select(captureOption, "cdc capture list", 20)
 	_, c, err := p.Run()
 	if err != nil {
 		return err
 	}
-	if c == "return?" {
+	if c == printer.Return() {
 		if err := r.Run(); err != nil {
 			return err
 		}
@@ -127,8 +139,6 @@ func (r *Runner) displayCapture() error {
 		fmt.Sprintf("version: %s", cs[c].Version),
 		fmt.Sprintf("pid:     %d", cs[c].Pid)})
 	fmt.Println(l.Render())
-	if printer.Confirm() {
-		return r.displayCapture()
-	}
+	return r.displayCapture()
 	return nil
 }

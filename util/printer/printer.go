@@ -41,3 +41,7 @@ func Confirm() bool {
 func PrintError(e string) {
 	fmt.Println(color.Red(e))
 }
+
+func Return() string {
+	return color.Green("<")
+}
