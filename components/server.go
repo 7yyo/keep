@@ -24,8 +24,8 @@ func (s *Server) Run(c string) error {
 	switch c {
 	case "cdc":
 		r := cdc.Runner{
-			Etcd: s.Etcd,
-			Pd:   s.PlacementDriver,
+			Etcd:            s.Etcd,
+			PlacementDriver: s.PlacementDriver,
 		}
 		return r.Run()
 	case "tidb":
@@ -37,12 +37,12 @@ func (s *Server) Run(c string) error {
 		return r.Run()
 	case "pd":
 		r := p.Runner{
-			Pd: s.PlacementDriver,
+			Pd:   s.PlacementDriver,
+			Etcd: s.Etcd,
 		}
 		return r.Run()
-	default:
-		return nil
 	}
+	return nil
 }
 
 func NewEtcd(endpoints []string) *clientv3.Client {
@@ -50,7 +50,7 @@ func NewEtcd(endpoints []string) *clientv3.Client {
 		Endpoints:   endpoints,
 		DialTimeout: 5 * time.Second,
 		LogConfig: &zap.Config{
-			Level:       zap.NewAtomicLevelAt(zap.ErrorLevel),
+			Level:       zap.NewAtomicLevelAt(zap.FatalLevel),
 			Development: false,
 			Sampling: &zap.SamplingConfig{
 				Initial:    100,

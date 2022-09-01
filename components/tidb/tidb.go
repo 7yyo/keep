@@ -3,9 +3,9 @@ package tidb
 import (
 	"context"
 	"encoding/json"
-	"github.com/manifoldco/promptui"
 	"go.etcd.io/etcd/clientv3"
 	components "keep/components/pd"
+	"keep/promp"
 	"strings"
 )
 
@@ -24,14 +24,13 @@ type Runner struct {
 	TidbCluster []*TiDB
 }
 
+var tidbOption = []string{
+	". SCHEMA",
+	". VARIABLES",
+}
+
 func (r *Runner) Run() error {
-	p := promptui.Select{
-		Label: "tidb",
-		Items: []string{
-			"schema",
-			"config",
-		},
-	}
+	p := promp.Select(tidbOption, "tidb", 20)
 	i, _, err := p.Run()
 	if err != nil {
 		return err

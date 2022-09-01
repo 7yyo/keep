@@ -1,15 +1,16 @@
 package cdc
 
 import (
+	"atomicgo.dev/keyboard/keys"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/7yyo/sunflower/prompt"
 	"github.com/jedib0t/go-pretty/v6/list"
-	"github.com/manifoldco/promptui"
 	"github.com/tikv/client-go/v2/oracle"
 	"golang.org/x/sync/errgroup"
 	"keep/components/tidb"
-	"keep/promp"
 	"keep/util/color"
 	net "keep/util/net"
 	"keep/util/o"
@@ -99,7 +100,38 @@ type changefeedConfig struct {
 	CreatorVersion    string      `json:"creator-version"`
 }
 
+func (r *Runner) displayChangefeedList() error {
+	cfs, err := r.changefeedInfo()
+	if err != nil {
+		return err
+	}
+	changefeedOption := make([]interface{}, 0)
+	for _, cf := range cfs {
+		changefeedOption = append(changefeedOption, cf.Id)
+	}
+	if len(changefeedOption) == 0 {
+		return errors.New("no changefeed found")
+	}
+	p := prompt.Select{
+		Title:  "changefeed:",
+		Option: changefeedOption,
+	}
+	_, c, err := p.Run()
+	if err != nil {
+		if prompt.IsBackSpace(err) {
+			return r.Run()
+		}
+		return err
+	}
+	r.changefeedId = c.(string)
+	return r.displayChangefeedMenu()
+}
+
 func (r *Runner) changefeedInfo() (changefeed, error) {
+	_, err := r.getCaptureInfo()
+	if err != nil {
+		return nil, err
+	}
 	body, err := net.GetHttp(fmt.Sprintf("http://%s/api/v1/changefeeds", r.captures[0].Address))
 	if err != nil {
 		return nil, err
@@ -109,7 +141,7 @@ func (r *Runner) changefeedInfo() (changefeed, error) {
 		return nil, err
 	}
 	if len(cf) == 0 {
-		fmt.Println(color.Red("no changefeed found, return..."))
+		fmt.Println(color.Red("no changefeed found in this cluster"))
 		return nil, r.Run()
 	}
 	return cf, nil
@@ -128,72 +160,42 @@ func (r *Runner) changefeedInfoDetails() (*changefeedDetail, error) {
 	return &cd, nil
 }
 
-func (r *Runner) displayChangefeedList() error {
-
-	_, err := r.captureInfo()
-	if err != nil {
-		return err
-	}
-	cfs, err := r.changefeedInfo()
-	if err != nil {
-		return err
-	}
-
-	changefeedOption := make([]string, 0)
-	changefeedOption = append(changefeedOption, printer.Return())
-	for _, cf := range cfs {
-		changefeedOption = append(changefeedOption, cf.Id)
-	}
-	p := promp.Select(changefeedOption, "cdc changefeed list", 20)
-	_, c, err := p.Run()
-	if err != nil {
-		return err
-	}
-	r.changefeedId = c
-
-	if c == printer.Return() {
-		if err := r.Run(); err != nil {
-			return err
-		}
-	}
-	return r.displayChangefeedMenu()
-}
-
-var changefeedMenu = []string{
-	printer.Return(),
-	"info",
-	"config",
-	"pause",
-	"resume",
-	"transfer",
-	"rebalance",
-	color.Red("remove???"),
+var changefeedMenu = []interface{}{
+	" info",
+	" config",
+	" pause",
+	" resume",
+	" transfer",
+	" balance",
+	" remove",
 }
 
 func (r *Runner) displayChangefeedMenu() error {
-
-	p := promp.Select(changefeedMenu, "cdc changefeed menu", 20)
+	p := prompt.Select{
+		Title:  "which operation?",
+		Option: changefeedMenu,
+		Cap:    5,
+	}
 	i, _, err := p.Run()
 	if err != nil {
-		return err
+		if err.Error() == keys.Backspace.String() {
+			return r.displayChangefeedList()
+		}
 	}
-
 	switch i {
 	case 0:
-		err = r.displayChangefeedList()
-	case 1:
 		err = r.displayChangefeedDetails()
-	case 2:
+	case 1:
 		err = r.displayChangefeedConfig()
-	case 3:
+	case 2:
 		err = r.doChangefeed("pause", "stopped")
-	case 4:
+	case 3:
 		err = r.doChangefeed("resume", "normal")
-	case 5:
+	case 4:
 		err = r.transferTbl()
+	case 5:
+		err = r.curlChangefeed("balance")
 	case 6:
-		err = r.curlChangefeed("rebalance")
-	case 7:
 		err = r.curlChangefeed("remove")
 	}
 	return err
@@ -206,7 +208,7 @@ func (r *Runner) displayChangefeedDetails() error {
 		return err
 	}
 
-	partitions, err := tidb.ListPartition(r.Pd.Leader.ClientUrls[0], o.CheckPointTs(), r.Etcd)
+	partitions, err := tidb.ListPartition(r.PlacementDriver.Leader.ClientUrls[0], o.CheckPointTs(), r.Etcd)
 	if err != nil {
 		return err
 	}
@@ -226,7 +228,7 @@ func (r *Runner) displayChangefeedDetails() error {
 	l.AppendItems([]interface{}{
 		fmt.Sprintf("sink_url:         %s", cd.SinkURI),
 		fmt.Sprintf("create_time:      %s", cd.CreateTime),
-		fmt.Sprintf("start_ts:         %d\n                  (%v)", cd.StartTs, oracle.GetTimeFromTS(uint64(cd.StartTs))),
+		fmt.Sprintf("start_ts:         %d (%v)", cd.StartTs, oracle.GetTimeFromTS(uint64(cd.StartTs))),
 		fmt.Sprintf("target_ts:        %d", cd.TargetTs),
 		fmt.Sprintf("checkpoint_tso:   %d", cd.CheckpointTso),
 		fmt.Sprintf("checkpoint_time:  %s", cd.CheckpointTime),
@@ -239,11 +241,11 @@ func (r *Runner) displayChangefeedDetails() error {
 	cp := make(map[capture]processor)
 	wg := &sync.WaitGroup{}
 	wd := make(chan bool)
-	errors := make(chan error)
-	defer close(errors)
+	es := make(chan error)
+	defer close(es)
 	for _, c := range r.captures {
 		wg.Add(1)
-		go r.hookProcessor(c, cp, wg, errors)
+		go r.hookProcessor(c, cp, wg, es)
 	}
 	go func() {
 		wg.Wait()
@@ -252,27 +254,26 @@ func (r *Runner) displayChangefeedDetails() error {
 	select {
 	case <-wd:
 		break
-	case err := <-errors:
+	case err := <-es:
 		if err != nil {
 			return err
 		}
 	}
 
-	pl, err := tidb.ListPartition(r.Pd.Leader.ClientUrls[0], o.TSOracle(), r.Etcd)
+	pl, err := tidb.ListPartition(r.PlacementDriver.Leader.ClientUrls[0], o.TSOracle(), r.Etcd)
 	if err != nil {
 		return err
 	}
 
 	for c, pro := range cp {
 		l.AppendItems([]interface{}{
-			fmt.Sprintf("%s\n%s", color.Green(c.Address), color.Green(c.Id)),
+			fmt.Sprintf("%s (%s)", color.Green(c.Address), c.Id),
 		})
 		l.Indent()
 		l.AppendItems([]interface{}{
-			fmt.Sprintf("checkpoint_ts: %d\n               (%s)", pro.CheckpointTs, oracle.GetTimeFromTS(uint64(pro.CheckpointTs))),
-			fmt.Sprintf("resolved_ts:   %d\n               (%s)", pro.ResolvedTs, oracle.GetTimeFromTS(uint64(pro.ResolvedTs))),
-			fmt.Sprintf("lag:           %.2fs", oracle.GetTimeFromTS(uint64(pro.ResolvedTs)).Sub(oracle.GetTimeFromTS(uint64(pro.CheckpointTs))).Seconds()),
-			"table list:",
+			fmt.Sprintf("checkpoint_ts: %d (%s)", pro.CheckpointTs, oracle.GetTimeFromTS(uint64(pro.CheckpointTs))),
+			fmt.Sprintf("resolved_ts:   %d (%s)", pro.ResolvedTs, oracle.GetTimeFromTS(uint64(pro.ResolvedTs))),
+			"table:",
 		})
 		l.Indent()
 		tblStr := ""
@@ -294,18 +295,18 @@ func (r *Runner) displayChangefeedDetails() error {
 		l.UnIndent()
 	}
 	fmt.Println(l.Render())
-	return r.displayChangefeedMenu()
+	if prompt.Back() {
+		return r.displayChangefeedMenu()
+	}
+	return nil
 }
 
 func (r *Runner) doChangefeed(c string, t string) error {
-	p := promptui.Prompt{
-		Label:     "return",
-		IsConfirm: true,
+	b, err := prompt.Conform()
+	if err != nil {
+		return err
 	}
-	result, _ := p.Run()
-	if result != "y" {
-		return r.displayChangefeedMenu()
-	} else {
+	if b {
 		req := fmt.Sprintf("http://%s/api/v1/changefeeds/%s/%s", r.captures[0].Address, r.changefeedId, c)
 		if _, err := net.PostHttp(req, ""); err != nil {
 			return err
@@ -321,8 +322,8 @@ func (r *Runner) doChangefeed(c string, t string) error {
 		if err := group.Wait(); err != nil {
 			return err
 		}
-		return r.displayChangefeedMenu()
 	}
+	return r.displayChangefeedMenu()
 }
 
 func (r *Runner) changefeedState(state string) error {
@@ -335,7 +336,6 @@ func (r *Runner) changefeedState(state string) error {
 		}
 		if cd.State == state {
 			ticker.Stop()
-			fmt.Printf(color.Green("changefeed state changed to [%s] complete\n"), state)
 			break
 		} else {
 			retry++
@@ -373,7 +373,7 @@ func (r *Runner) displayChangefeedConfig() error {
 	l.Indent()
 	l.AppendItems([]interface{}{
 		fmt.Sprintf("rules: %v", cc.Config.Filter.Rules),
-		fmt.Sprintf("ignoreTxnStartTs: %v", cc.Config.Filter.IgnoreTxnStartTs),
+		fmt.Sprintf("ignoreTxnStartTs: %v", printer.IsNil(cc.Config.Filter.IgnoreTxnStartTs)),
 	})
 	l.UnIndent()
 	l.AppendItems([]interface{}{
@@ -389,10 +389,10 @@ func (r *Runner) displayChangefeedConfig() error {
 	})
 	l.Indent()
 	l.AppendItems([]interface{}{
-		fmt.Sprintf("dispatchers: %v", cc.Config.Sink.Dispatchers),
-		fmt.Sprintf("protocol: %v", cc.Config.Sink.Protocol),
-		fmt.Sprintf("columnSelectors: %v", cc.Config.Sink.ColumnSelectors),
-		fmt.Sprintf("schemaRegistry: %v", cc.Config.Sink.SchemaRegistry),
+		fmt.Sprintf("dispatchers: %v", printer.IsNil(cc.Config.Sink.Dispatchers)),
+		fmt.Sprintf("protocol: %v", printer.IsNil(cc.Config.Sink.Protocol)),
+		fmt.Sprintf("columnSelectors: %v", printer.IsNil(cc.Config.Sink.ColumnSelectors)),
+		fmt.Sprintf("schemaRegistry: %v", printer.IsNil(cc.Config.Sink.SchemaRegistry)),
 	})
 	l.UnIndent()
 	l.AppendItems([]interface{}{
@@ -402,7 +402,7 @@ func (r *Runner) displayChangefeedConfig() error {
 	l.AppendItems([]interface{}{
 		fmt.Sprintf("enable: %v", cc.Config.CyclicReplication.Enable),
 		fmt.Sprintf("replicaID: %d", cc.Config.CyclicReplication.ReplicaID),
-		fmt.Sprintf("filterReplicaIds: %v", cc.Config.CyclicReplication.FilterReplicaIds),
+		fmt.Sprintf("filterReplicaIds: %v", printer.IsNil(cc.Config.CyclicReplication.FilterReplicaIds)),
 		fmt.Sprintf("IDBuckets: %d", cc.Config.CyclicReplication.IDBuckets),
 		fmt.Sprintf("syncDdl: %v", cc.Config.CyclicReplication.SyncDdl),
 	})
@@ -418,17 +418,20 @@ func (r *Runner) displayChangefeedConfig() error {
 		fmt.Sprintf("storage: %v", cc.Config.Consistent.Storage),
 	})
 	fmt.Println(l.Render())
-	return r.displayChangefeedMenu()
+
+	if prompt.Back() {
+		return r.displayChangefeedMenu()
+	}
+	return nil
 }
 
 func (r *Runner) transferTbl() error {
 
-	pl, err := tidb.ListPartition(r.Pd.Leader.ClientUrls[0], o.CheckPointTs(), r.Etcd)
+	pl, err := tidb.ListPartition(r.PlacementDriver.Leader.ClientUrls[0], o.CheckPointTs(), r.Etcd)
 	if err != nil {
 		return err
 	}
-	partitions := make([]string, 0, len(pl))
-	partitions = append(partitions, printer.Return())
+	partitions := make([]interface{}, 0, len(pl))
 	for _, p := range pl {
 		if p.Name != "" {
 			partitions = append(partitions, fmt.Sprintf("[%d]`%s`.`%s`.`%s`", p.ID, p.DBName, p.Table.Name, p.Name))
@@ -436,70 +439,60 @@ func (r *Runner) transferTbl() error {
 			partitions = append(partitions, fmt.Sprintf("[%d]`%s`.`%s`", p.Table.ID, p.DBName, p.Table.Name))
 		}
 	}
-
-	searcher := func(input string, index int) bool {
-		pName := partitions[index]
-		name := strings.Replace(strings.ToLower(pName), " ", "", -1)
-		input = strings.Replace(strings.ToLower(input), " ", "", -1)
-		return strings.Contains(name, input)
+	p := prompt.Select{
+		Title:  "transfer which table?",
+		Option: partitions,
 	}
-	p := promp.Select(partitions, "choose table to transfer", 20)
-	p.Searcher = searcher
-	i, tbl, err := p.Run()
-	if i == 0 {
-		return r.displayChangefeedMenu()
-	}
+	_, tbl, err := p.Run()
 
-	tblId, err := strconv.Atoi(strings.Split(tbl, "]")[0][1:])
+	tblId, err := strconv.Atoi(strings.Split(tbl.(string), "]")[0][1:])
 	if err != nil {
 		return err
 	}
 
-	cl, err := r.captureList()
+	cm, err := r.getCaptureInfo()
 	if err != nil {
 		return err
 	}
 
-	ps := promp.Select(cl, "choose capture to transfer", 20)
+	cl := captureList(cm)
+	icl := make([]interface{}, 0, len(cl))
+	for _, c := range cl {
+		icl = append(icl, c)
+	}
+	ps := prompt.Select{
+		Title:  "transfer to which capture?",
+		Option: icl,
+	}
 	_, cpId, err := ps.Run()
 	if err != nil {
 		return err
 	}
 
-	if i == 0 {
-		return r.displayChangefeedMenu()
-	}
 	postData := map[string]interface{}{
-		"capture_id": strings.Split(cpId, "(")[1][:len(strings.Split(cpId, "(")[1])-1],
+		"capture_id": strings.Split(cpId.(string), "(")[1][:len(strings.Split(cpId.(string), "(")[1])-1],
 		"table_id":   tblId,
 	}
-
-	fmt.Println()
-	pp := promptui.Prompt{
-		Label:     "transfer?",
-		IsConfirm: true,
+	b, err := prompt.Conform()
+	if err != nil {
+		return err
 	}
-	result, _ := pp.Run()
-	if result != "y" {
+	if !b {
 		return r.displayChangefeedMenu()
 	}
-
 	req := fmt.Sprintf("http://%s/api/v1/changefeeds/%s/tables/move_table", r.captures[0].Address, r.changefeedId)
 	if err := net.Curl(req, postData); err != nil {
 		return err
-	} else {
-		fmt.Println(fmt.Sprintf(color.Green("%s =>>> %s success"), tbl, cpId))
 	}
 	return r.displayChangefeedMenu()
 }
 
 func (r *Runner) curlChangefeed(c string) error {
-	pp := promptui.Prompt{
-		Label:     c + "?",
-		IsConfirm: true,
+	b, err := prompt.Conform()
+	if err != nil {
+		return err
 	}
-	result, _ := pp.Run()
-	if result != "y" {
+	if !b {
 		return r.displayChangefeedMenu()
 	}
 
@@ -509,18 +502,14 @@ func (r *Runner) curlChangefeed(c string) error {
 		req = fmt.Sprintf("http://%s/api/v1/changefeeds/%s", r.captures[0].Address, r.changefeedId)
 		if err := net.DeleteCurl(req); err != nil {
 			return err
-		} else {
-			fmt.Println(fmt.Sprintf(color.Green("%sd %s"), c, r.changefeedId))
 		}
 		return r.displayChangefeedList()
-	case "rebalance":
+	case "balance":
 		req = fmt.Sprintf("http://%s/api/v1/changefeeds/%s/tables/rebalance_table", r.captures[0].Address, r.changefeedId)
 		if err := net.Curl(req, nil); err != nil {
 			return err
-		} else {
-			fmt.Println(fmt.Sprintf(color.Green("%s `%s` success"), c, r.changefeedId))
-			return r.displayChangefeedMenu()
 		}
+		return r.displayChangefeedMenu()
 	default:
 		return nil
 	}

@@ -4,8 +4,23 @@ import (
 	"fmt"
 	"github.com/manifoldco/promptui"
 	"keep/util/color"
-	"keep/util/sys"
 )
+
+func Welcome() {
+	fmt.Println("\n" +
+		" __   ___  _______   _______    _______   \n" +
+		"|/\"| /  \")/\"     \"| /\"     \"|  |   __ \"\\  \n" +
+		"(: |/   /(: ______)(: ______)  (. |__) :) \n" +
+		"|    __/  \\/    |   \\/    |    |:  ____/  \n" +
+		"(// _  \\  // ___)_  // ___)_   (|  /      \n" +
+		"|: | \\  \\(:      \"|(:      \"| /|__/ \\     \n" +
+		"(__|  \\__)\\_______) \\_______)(_______)    \n" +
+		"                                          ")
+}
+
+func Bye() {
+	fmt.Println("\nbye!")
+}
 
 func IsNil(i interface{}) interface{} {
 	if i == nil {
@@ -26,20 +41,23 @@ func Status(s string) string {
 }
 
 func Confirm() bool {
-	fmt.Println()
 	p := promptui.Prompt{
 		Label:     "return",
 		IsConfirm: true,
+		Default:   "y",
+		Validate: func(input string) error {
+			if input != "y" && input != "Y" {
+				return fmt.Errorf("invalid input, please enter `y` or `Y`")
+			}
+			return nil
+		},
 	}
-	result, _ := p.Run()
-	if result != "y" {
-		sys.Exit()
-	}
+	_, _ = p.Run()
 	return true
 }
 
 func PrintError(e string) {
-	fmt.Println(color.Red(e))
+	fmt.Printf(color.Red(e))
 }
 
 func Return() string {

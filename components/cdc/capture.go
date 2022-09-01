@@ -4,12 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/7yyo/sunflower/prompt"
 	"github.com/jedib0t/go-pretty/v6/list"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
-	"keep/promp"
 	net "keep/util/net"
-	"keep/util/printer"
 	"strings"
 	"sync"
 )
@@ -17,10 +16,7 @@ import (
 type capture struct {
 	Id      string `json:"id"`
 	Address string `json:"address"`
-	Version string `json:"version"`
-	IsOwner bool
-	Pid     int
-	GitHash string
+	captureStatus
 }
 
 type captureStatus struct {
@@ -31,25 +27,21 @@ type captureStatus struct {
 	IsOwner bool   `json:"is_owner"`
 }
 
-func (r *Runner) captureInfo() (map[string]capture, error) {
-
+func (r *Runner) getCaptureInfo() (map[string]capture, error) {
 	body, err := r.Etcd.Get(context.TODO(), "/tidb/cdc/capture/", clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
 	}
-
-	r.captures = make([]capture, 0, len(body.Kvs))
-	wg := &sync.WaitGroup{}
 	wd := make(chan bool)
 	defer close(wd)
-	errors := make(chan error)
-	defer close(errors)
+	eh := make(chan error)
+	defer close(eh)
+	wg := &sync.WaitGroup{}
 	cm := make(map[string]capture)
 	for _, kv := range body.Kvs {
 		wg.Add(1)
-		go r.hookCapture(kv, cm, wg, errors)
+		go r.hookCapture(kv, cm, wg, eh)
 	}
-
 	go func() {
 		wg.Wait()
 		wd <- true
@@ -57,26 +49,21 @@ func (r *Runner) captureInfo() (map[string]capture, error) {
 	select {
 	case <-wd:
 		break
-	case err := <-errors:
+	case err := <-eh:
 		return nil, err
 	}
-
 	if len(cm) == 0 {
 		return nil, fmt.Errorf("no capture in this cluster")
 	}
 	return cm, nil
 }
 
-func (r *Runner) captureList() ([]string, error) {
-	cs, err := r.captureInfo()
-	if err != nil {
-		return nil, err
+func captureList(cm map[string]capture) []string {
+	var captureList []string
+	for _, c := range cm {
+		captureList = append(captureList, fmt.Sprintf("%s(%s)", c.Address, c.Id))
 	}
-	cl := make([]string, 0, len(cs))
-	for _, c := range cs {
-		cl = append(cl, fmt.Sprintf("%s(%s)", c.Address, c.Id))
-	}
-	return cl, nil
+	return captureList
 }
 
 func (r *Runner) hookCapture(kv *mvccpb.KeyValue, cMap map[string]capture, wg *sync.WaitGroup, errors chan error) {
@@ -87,7 +74,6 @@ func (r *Runner) hookCapture(kv *mvccpb.KeyValue, cMap map[string]capture, wg *s
 	if err != nil {
 		errors <- err
 	}
-
 	body, err := net.GetHttp(fmt.Sprintf("http://%s/api/v1/status", c.Address))
 	if err != nil {
 		errors <- err
@@ -99,46 +85,53 @@ func (r *Runner) hookCapture(kv *mvccpb.KeyValue, cMap map[string]capture, wg *s
 	c.IsOwner = cst.IsOwner
 	c.GitHash = cst.GitHash
 	c.Pid = cst.Pid
-
 	r.Lock()
 	cMap[c.Address] = c
 	r.captures = append(r.captures, c)
 	r.Unlock()
 }
 
-func (r *Runner) displayCapture() error {
-	cs, err := r.captureInfo()
+func (r *Runner) displayCaptureList() error {
+	cmap, err := r.getCaptureInfo()
 	if err != nil {
 		return err
 	}
-	captureOption := make([]string, 0, len(cs))
-	captureOption = append(captureOption, printer.Return())
-	for _, c := range cs {
+	captureOption := make([]interface{}, 0, len(cmap))
+	for _, c := range cmap {
 		if c.IsOwner {
 			captureOption = append(captureOption, fmt.Sprintf("%s (owner)", c.Address))
 		} else {
 			captureOption = append(captureOption, c.Address)
 		}
 	}
-	p := promp.Select(captureOption, "cdc capture list", 20)
-	_, c, err := p.Run()
+	se := prompt.Select{
+		Title:  "capture:",
+		Option: captureOption,
+	}
+	_, c, err := se.Run()
 	if err != nil {
+		if prompt.IsBackSpace(err) {
+			if err := r.Run(); err != nil {
+				return err
+			}
+		}
 		return err
 	}
-	if c == printer.Return() {
-		if err := r.Run(); err != nil {
-			return err
-		}
-	}
-	c = strings.TrimSpace(strings.Split(c, "(")[0])
+	return r.displayCapture(cmap, c)
+}
+
+func (r *Runner) displayCapture(cm map[string]capture, c interface{}) error {
+	c = strings.TrimSpace(strings.Split(c.(string), "(")[0])
 	l := list.NewWriter()
 	l.SetStyle(list.StyleBulletCircle)
 	l.AppendItems([]interface{}{
-		fmt.Sprintf("id:      %s", cs[c].Id),
-		fmt.Sprintf("owner:   %v", cs[c].IsOwner),
-		fmt.Sprintf("version: %s", cs[c].Version),
-		fmt.Sprintf("pid:     %d", cs[c].Pid)})
+		fmt.Sprintf("id:      %s", cm[c.(string)].Id),
+		fmt.Sprintf("owner:   %v", cm[c.(string)].IsOwner),
+		fmt.Sprintf("version: %s", cm[c.(string)].Version),
+		fmt.Sprintf("pid:     %d", cm[c.(string)].Pid)})
 	fmt.Println(l.Render())
-	return r.displayCapture()
+	if prompt.Back() {
+		return r.displayCaptureList()
+	}
 	return nil
 }

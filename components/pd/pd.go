@@ -3,9 +3,9 @@ package components
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/manifoldco/promptui"
+	"github.com/7yyo/sunflower/prompt"
+	"go.etcd.io/etcd/clientv3"
 	"io"
-	"keep/util/color"
 	net "keep/util/net"
 	"keep/util/printer"
 	"net/http"
@@ -232,26 +232,21 @@ type Config struct {
 	} `json:"replication-mode"`
 }
 
-type Runner struct {
-	Pd *PlacementDriver
+type config struct {
+	Name     string
+	Default  string
+	Current  string
+	Optional string
+	Unit     string
 }
 
-func (r *Runner) Run() error {
-	p := promptui.Select{
-		Label: "placement driver",
-		Items: []string{
-			"config",
-		},
-	}
-	i, _, err := p.Run()
-	if err != nil {
-		return err
-	}
-	switch i {
-	case 0:
-		return r.displayConfigs()
-	}
-	return nil
+type Runner struct {
+	Pd   *PlacementDriver
+	Etcd *clientv3.Client
+}
+
+var pdOptions = []interface{}{
+	" config",
 }
 
 func NewPlacementDriver(pd string) *PlacementDriver {
@@ -264,90 +259,119 @@ func NewPlacementDriver(pd string) *PlacementDriver {
 	return &pdGroup
 }
 
-func (r *Runner) configs() (map[string]string, []string, error) {
-	req := fmt.Sprintf("%s/pd/api/v1/config", r.Pd.Leader.ClientUrls[0])
+func (r *Runner) Run() error {
+	p := prompt.Select{
+		Option: pdOptions,
+	}
+	i, _, err := p.Run()
+	if err != nil {
+		return err
+	}
+	switch i {
+	case 0:
+		return r.displayConfigs()
+	}
+	return nil
+}
+
+func (r *Runner) configs() ([]interface{}, error) {
+
+	cfg, err := r.getConfig(false)
+	if err != nil {
+		return nil, err
+	}
+	dCfg, err := r.getConfig(true)
+	if err != nil {
+		return nil, err
+	}
+
+	configs := make([]interface{}, 0)
+	configs = append(configs, config{Name: "cluster-version", Current: cfg.ClusterVersion, Default: dCfg.ClusterVersion})
+	configs = append(configs, config{Name: "log.level", Current: cfg.Log.Level, Default: dCfg.Log.Level, Optional: "debug, info, warn, error, fatal"})
+	configs = append(configs, config{Name: "schedule.max-merge-region-size", Current: strconv.Itoa(cfg.Schedule.MaxMergeRegionSize), Default: strconv.Itoa(dCfg.Schedule.MaxMergeRegionSize), Unit: "MiB"})
+	configs = append(configs, config{Name: "schedule.max-merge-region-keys", Current: strconv.Itoa(dCfg.Schedule.MaxMergeRegionKeys), Default: strconv.Itoa(cfg.Schedule.MaxMergeRegionKeys)})
+	configs = append(configs, config{Name: "schedule.patrol-region-interval", Current: cfg.Schedule.PatrolRegionInterval, Default: dCfg.Schedule.PatrolRegionInterval})
+	configs = append(configs, config{Name: "schedule.split-merge-interval", Current: cfg.Schedule.SplitMergeInterval, Default: dCfg.Schedule.SplitMergeInterval})
+	configs = append(configs, config{Name: "schedule.max-snapshot-count", Current: strconv.Itoa(cfg.Schedule.MaxSnapshotCount), Default: strconv.Itoa(dCfg.Schedule.MaxSnapshotCount)})
+	configs = append(configs, config{Name: "schedule.max-pending-peer-count", Current: strconv.Itoa(cfg.Schedule.MaxPendingPeerCount), Default: strconv.Itoa(dCfg.Schedule.MaxPendingPeerCount)})
+	configs = append(configs, config{Name: "schedule.max-store-down-time", Current: cfg.Schedule.MaxStoreDownTime, Default: dCfg.Schedule.MaxStoreDownTime})
+	configs = append(configs, config{Name: "schedule.leader-schedule-policy", Current: cfg.Schedule.LeaderSchedulePolicy, Default: dCfg.Schedule.LeaderSchedulePolicy})
+	configs = append(configs, config{Name: "schedule.leader-schedule-limit", Current: strconv.Itoa(cfg.Schedule.LeaderScheduleLimit), Default: strconv.Itoa(dCfg.Schedule.LeaderScheduleLimit)})
+	configs = append(configs, config{Name: "schedule.region-schedule-limit", Current: strconv.Itoa(cfg.Schedule.RegionScheduleLimit), Default: strconv.Itoa(dCfg.Schedule.RegionScheduleLimit)})
+	configs = append(configs, config{Name: "schedule.replica-schedule-limit", Current: strconv.Itoa(cfg.Schedule.ReplicaScheduleLimit), Default: strconv.Itoa(dCfg.Schedule.ReplicaScheduleLimit)})
+	configs = append(configs, config{Name: "schedule.merge-schedule-limit", Current: strconv.Itoa(cfg.Schedule.MergeScheduleLimit), Default: strconv.Itoa(dCfg.Schedule.MergeScheduleLimit)})
+	configs = append(configs, config{Name: "schedule.hot-region-schedule-limit", Current: strconv.Itoa(cfg.Schedule.HotRegionScheduleLimit), Default: strconv.Itoa(dCfg.Schedule.HotRegionScheduleLimit)})
+	configs = append(configs, config{Name: "schedule.hot-region-cache-hits-threshold", Current: strconv.Itoa(cfg.Schedule.HotRegionCacheHitsThreshold), Default: strconv.Itoa(dCfg.Schedule.HotRegionCacheHitsThreshold)})
+	configs = append(configs, config{Name: "schedule.high-space-ratio", Current: strconv.FormatFloat(cfg.Schedule.HighSpaceRatio, 'g', 12, 64), Default: strconv.FormatFloat(dCfg.Schedule.HighSpaceRatio, 'g', 12, 64)})
+	configs = append(configs, config{Name: "schedule.low-space-ratio", Current: strconv.FormatFloat(cfg.Schedule.LowSpaceRatio, 'g', 12, 64), Default: strconv.FormatFloat(dCfg.Schedule.LowSpaceRatio, 'g', 12, 64)})
+	configs = append(configs, config{Name: "schedule.tolerant-size-ratio", Current: strconv.Itoa(cfg.Schedule.TolerantSizeRatio), Default: strconv.Itoa(dCfg.Schedule.TolerantSizeRatio)})
+	configs = append(configs, config{Name: "schedule.enable-remove-down-replica", Current: cfg.Schedule.EnableRemoveDownReplica, Default: dCfg.Schedule.EnableRemoveDownReplica})
+	configs = append(configs, config{Name: "schedule.enable-replace-offline-replica", Current: cfg.Schedule.EnableReplaceOfflineReplica, Default: dCfg.Schedule.EnableReplaceOfflineReplica})
+	configs = append(configs, config{Name: "schedule.enable-make-up-replica", Current: cfg.Schedule.EnableMakeUpReplica, Default: dCfg.Schedule.EnableMakeUpReplica})
+	configs = append(configs, config{Name: "schedule.enable-remove-extra-replica", Current: cfg.Schedule.EnableRemoveExtraReplica, Default: dCfg.Schedule.EnableRemoveExtraReplica})
+	configs = append(configs, config{Name: "schedule.enable-location-replacement", Current: cfg.Schedule.EnableLocationReplacement, Default: dCfg.Schedule.EnableLocationReplacement})
+	configs = append(configs, config{Name: "schedule.enable-cross-table-merge", Current: cfg.Schedule.EnableCrossTableMerge, Default: dCfg.Schedule.EnableCrossTableMerge})
+	configs = append(configs, config{Name: "schedule.enable-one-way-merge", Current: cfg.Schedule.EnableOneWayMerge, Default: dCfg.Schedule.EnableOneWayMerge})
+	configs = append(configs, config{Name: "replication.max-replicas", Current: strconv.Itoa(cfg.Replication.MaxReplicas), Default: strconv.Itoa(dCfg.Replication.MaxReplicas)})
+	configs = append(configs, config{Name: "replication.location-labels", Current: cfg.Replication.LocationLabels, Default: dCfg.Replication.LocationLabels})
+	configs = append(configs, config{Name: "replication.enable-placement-rules", Current: cfg.Replication.EnablePlacementRules, Default: dCfg.Replication.EnablePlacementRules})
+	configs = append(configs, config{Name: "replication.strictly-match-label", Current: cfg.Replication.StrictlyMatchLabel, Default: dCfg.Replication.StrictlyMatchLabel})
+	configs = append(configs, config{Name: "pd-server.use-region-storage", Current: cfg.PdServer.UseRegionStorage, Default: dCfg.PdServer.UseRegionStorage})
+	configs = append(configs, config{Name: "pd-server.max-gap-reset-ts", Current: cfg.PdServer.MaxGapResetTs, Default: dCfg.PdServer.MaxGapResetTs})
+	configs = append(configs, config{Name: "pd-server.key-type", Current: cfg.PdServer.KeyType, Default: dCfg.PdServer.KeyType})
+	configs = append(configs, config{Name: "pd-server.metric-storage", Current: cfg.PdServer.MetricStorage, Default: dCfg.PdServer.MetricStorage})
+	configs = append(configs, config{Name: "pd-server.dashboard-address", Current: cfg.PdServer.DashboardAddress, Default: dCfg.PdServer.DashboardAddress})
+	configs = append(configs, config{Name: "replication-mode.replication-mode", Current: cfg.ReplicationMode.ReplicationMode, Default: dCfg.ReplicationMode.ReplicationMode, Optional: "majority, dr-auto-sync"})
+	return configs, nil
+}
+
+func (r *Runner) getConfig(d bool) (*Config, error) {
+	req := ""
+	if !d {
+		req = fmt.Sprintf("%s/pd/api/v1/config", r.Pd.Leader.ClientUrls[0])
+	} else {
+		req = fmt.Sprintf("%s/pd/api/v1/config/default", r.Pd.Leader.ClientUrls[0])
+	}
+
 	body, err := net.GetHttp(req)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	var cfg Config
 	if err = json.Unmarshal(body, &cfg); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	cm := make(map[string]string)
-	cm["cluster-version"] = cfg.ClusterVersion
-	cm["log.level"] = cfg.Log.Level
-	cm["schedule.max-merge-region-size"] = strconv.Itoa(cfg.Schedule.MaxMergeRegionSize)
-	cm["schedule.max-merge-region-keys"] = strconv.Itoa(cfg.Schedule.MaxMergeRegionKeys)
-	cm["schedule.patrol-region-interval"] = cfg.Schedule.PatrolRegionInterval
-	cm["schedule.split-merge-interval"] = cfg.Schedule.SplitMergeInterval
-	cm["schedule.max-snapshot-count"] = strconv.Itoa(cfg.Schedule.MaxSnapshotCount)
-	cm["schedule.max-pending-peer-count"] = strconv.Itoa(cfg.Schedule.MaxPendingPeerCount)
-	cm["schedule.max-store-down-time"] = cfg.Schedule.MaxStoreDownTime
-	cm["schedule.leader-schedule-policy"] = cfg.Schedule.LeaderSchedulePolicy
-	cm["schedule.leader-schedule-limit"] = strconv.Itoa(cfg.Schedule.LeaderScheduleLimit)
-	cm["schedule.region-schedule-limit"] = strconv.Itoa(cfg.Schedule.RegionScheduleLimit)
-	cm["schedule.replica-schedule-limit"] = strconv.Itoa(cfg.Schedule.ReplicaScheduleLimit)
-	cm["schedule.merge-schedule-limit"] = strconv.Itoa(cfg.Schedule.MergeScheduleLimit)
-	cm["schedule.hot-region-schedule-limit"] = strconv.Itoa(cfg.Schedule.HotRegionScheduleLimit)
-	cm["schedule.hot-region-cache-hits-threshold"] = strconv.Itoa(cfg.Schedule.HotRegionCacheHitsThreshold)
-	cm["schedule.high-space-ratio"] = strconv.FormatFloat(cfg.Schedule.HighSpaceRatio, 'g', 12, 64)
-	cm["schedule.low-space-ratio"] = strconv.FormatFloat(cfg.Schedule.LowSpaceRatio, 'g', 12, 64)
-	cm["schedule.tolerant-size-ratio"] = strconv.Itoa(cfg.Schedule.TolerantSizeRatio)
-	cm["schedule.enable-remove-down-replica"] = cfg.Schedule.EnableRemoveDownReplica
-	cm["schedule.enable-replace-offline-replica"] = cfg.Schedule.EnableReplaceOfflineReplica
-	cm["schedule.enable-make-up-replica"] = cfg.Schedule.EnableMakeUpReplica
-	cm["schedule.enable-remove-extra-replica"] = cfg.Schedule.EnableRemoveExtraReplica
-	cm["schedule.enable-location-replacement"] = cfg.Schedule.EnableLocationReplacement
-	cm["schedule.enable-cross-table-merge"] = cfg.Schedule.EnableCrossTableMerge
-	cm["schedule.enable-one-way-merge"] = cfg.Schedule.EnableOneWayMerge
-	cm["replication.max-replicas"] = strconv.Itoa(cfg.Replication.MaxReplicas)
-	cm["replication.location-labels"] = cfg.Replication.LocationLabels
-	cm["replication.enable-placement-rules"] = cfg.Replication.EnablePlacementRules
-	cm["replication.strictly-match-label"] = cfg.Replication.StrictlyMatchLabel
-	cm["pd-server.use-region-storage"] = cfg.PdServer.UseRegionStorage
-	cm["pd-server.max-gap-reset-ts"] = cfg.PdServer.MaxGapResetTs
-	cm["pd-server.key-type"] = cfg.PdServer.KeyType
-	cm["pd-server.metric-storage"] = cfg.PdServer.MetricStorage
-	cm["pd-server.dashboard-address"] = cfg.PdServer.DashboardAddress
-	cm["replication-mode.replication-mode"] = cfg.ReplicationMode.ReplicationMode
-
-	keys := make([]string, 0, len(cm))
-	keys = append(keys, printer.Return())
-	for k, _ := range cm {
-		keys = append(keys, k)
-	}
-	return cm, keys, nil
+	return &cfg, err
 }
 
 func (r *Runner) displayConfigs() error {
-	m, c, err := r.configs()
+
+	configs, err := r.configs()
 	if err != nil {
 		return err
 	}
-	searcher := func(input string, index int) bool {
-		pName := c[index]
-		name := strings.Replace(strings.ToLower(pName), " ", "", -1)
-		input = strings.Replace(strings.ToLower(input), " ", "", -1)
-		return strings.Contains(name, input)
+
+	s := prompt.Select{
+		Option: configs,
+		Title:  "Select config to display",
+		Desc: &prompt.Desc{
+			T: "Name",
+			D: []string{
+				"Current",
+				"Default",
+				"Optional",
+				"Unit",
+			},
+		},
+		Cap: 15,
 	}
-	p := promptui.Select{
-		Label:    "configs",
-		Items:    c,
-		Searcher: searcher,
-		Size:     20,
-	}
-	_, result, err := p.Run()
-	if err != nil {
-		return err
-	}
-	if result == printer.Return() {
+	i, _, err := s.Run()
+	if prompt.IsBackSpace(err) {
 		return r.Run()
 	}
-	pp := promptui.Prompt{
-		Label: fmt.Sprintf("current `%s`, type `%s` return", color.Green(m[result]), "\\q"),
-	}
-	v, err := pp.Run()
+
+	cfg := configs[i].(config)
+	v, err := prompt.Assign(fmt.Sprintf("set %s =", cfg.Name))
 	if err != nil {
 		return err
 	}
@@ -355,17 +379,16 @@ func (r *Runner) displayConfigs() error {
 		return r.displayConfigs()
 	}
 	req := fmt.Sprintf("%s/pd/api/v1/config", r.Pd.Leader.ClientUrls[0])
-
 	cp, err := strconv.Atoi(v)
 	var jsonBody string
 	if err == nil {
-		jsonBody = fmt.Sprintf("{\"%s\":%d}", result, cp)
+		jsonBody = fmt.Sprintf("{\"%s\":%d}", cfg.Name, cp)
 	} else {
 		cp, err := strconv.ParseFloat(v, 64)
 		if err != nil {
-			jsonBody = fmt.Sprintf("{\"%s\":\"%s\"}", result, v)
+			jsonBody = fmt.Sprintf("{\"%s\":\"%s\"}", cfg.Name, v)
 		} else {
-			jsonBody = fmt.Sprintf("{\"%s\":%.1f}", result, cp)
+			jsonBody = fmt.Sprintf("{\"%s\":%.1f}", cfg.Name, cp)
 		}
 	}
 
@@ -376,9 +399,9 @@ func (r *Runner) displayConfigs() error {
 		if err != nil {
 			return err
 		}
-		printer.PrintError(fmt.Sprintf("update failed, error:\n%s", string(message)))
+		printer.PrintError(fmt.Sprintf("update failed, error: %s", string(message)))
 	} else {
-		fmt.Println(color.Green("update success!"))
+		fmt.Println("updated!")
 	}
 	return r.displayConfigs()
 }

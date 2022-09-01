@@ -3,13 +3,17 @@ module keep
 go 1.18
 
 require (
+	atomicgo.dev/keyboard v0.2.8
+	github.com/7yyo/sunflower v0.0.0-20220729152557-71c7ec512c8b
 	github.com/jedib0t/go-pretty/v6 v6.2.4
+	github.com/labstack/gommon v0.3.0
 	github.com/manifoldco/promptui v0.9.0
 	github.com/pingcap/log v0.0.0-20211207084639-71a2e5860834
 	github.com/pingcap/tidb v1.1.0-beta.0.20220210065735-92f5a6340ca2
 	github.com/pingcap/tidb/parser v0.0.0-20220210065735-92f5a6340ca2
 	github.com/pingcap/tiflow v0.0.0-20220223091343-9858cb8e630b
 	github.com/tikv/client-go/v2 v2.0.0-rc.0.20220107040026-d22815099720
+	github.com/tikv/pd v1.1.0-beta.0.20220207063535-9268bed87199
 	github.com/wujiangweiphp/go-curl v0.1.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20210512015243-d19fbe541bf9
 	go.uber.org/zap v1.19.1
@@ -31,7 +35,8 @@ require (
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.1.1 // indirect
 	github.com/cheggaaa/pb/v3 v3.0.8 // indirect
-	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
+	github.com/chzyer/readline v1.5.1 // indirect
+	github.com/containerd/console v1.0.3 // indirect
 	github.com/coocood/freecache v1.1.1 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd v0.0.0-20190719114852-fd7a80b32e1f // indirect
@@ -46,7 +51,7 @@ require (
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/edwingeng/deque v0.0.0-20191220032131-8596380dee17 // indirect
-	github.com/fatih/color v1.10.0 // indirect
+	github.com/fatih/color v1.13.0 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -109,7 +114,6 @@ require (
 	github.com/stretchr/objx v0.2.0 // indirect
 	github.com/stretchr/testify v1.7.0 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20210305035536-64b5b1c73954 // indirect
-	github.com/tikv/pd v1.1.0-beta.0.20220207063535-9268bed87199 // indirect
 	github.com/tinylib/msgp v1.1.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.9 // indirect
 	github.com/tklauser/numcpus v0.3.0 // indirect
@@ -130,10 +134,10 @@ require (
 	go.opencensus.io v0.23.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.7.0 // indirect
-	golang.org/x/crypto v0.0.0-20220131195533-30dcbda58838 // indirect
+	golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d // indirect
 	golang.org/x/net v0.0.0-20211112202133-69e39bad7dc2 // indirect
 	golang.org/x/oauth2 v0.0.0-20210805134026-6f1e6394065a // indirect
-	golang.org/x/sys v0.0.0-20220128215802-99c3d69c2c27 // indirect
+	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba // indirect
 	golang.org/x/tools v0.1.8 // indirect
@@ -152,3 +156,5 @@ require (
 // cloud.google.com/go/storage will upgrade grpc to v1.40.0
 // we need keep the replacement until go.etcd.io supports the higher version of grpc.
 replace google.golang.org/grpc v1.40.0 => google.golang.org/grpc v1.29.1
+
+replace github.com/7yyo/sunflower v0.0.0-20220729152557-71c7ec512c8b => /Users/yuyang/go/src/sunflower
